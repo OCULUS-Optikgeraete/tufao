@@ -18,6 +18,19 @@
   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
+
+  Changes:
+  - Add hook for ignoring some peers and ssl-errors (2020-07-23 14:19)
+
+    Introduce method `isPeerAccepted` to let subclasses of Tufao::WebSocket
+    allow/disallow peers with specific certificates. This change enables
+    example client software to implement certificate pinning.
+
+    Furthermore, introducing method `shouldIgnoreErrors` enables subclasses
+    of Tufao::WebSocket to change the semantics of the underyling private
+    `onSslErrors` method: It can ignore SSL errors, which would not be
+    ignored by `onSslErrors`, causing a connection to be closed and a
+    peer to be rejected.
   */
 
 #ifndef TUFAO_WEBSOCKET_H
@@ -27,6 +40,7 @@
 #include "headers.h"
 
 #include <QtNetwork/QAbstractSocket>
+#include <QtNetwork/QSslCertificate>
 
 #if defined(NO_ERROR) && defined(_WIN32)
 # define TUFAO_WINERROR_WORKAROUND
@@ -516,6 +530,25 @@ public slots:
       connectivity availability, among other.
       */
     bool ping(const QByteArray &data);
+
+    /*!
+      Returns true, iff `certificate` is considered ok.
+
+      If a connection between two peers is established, and the certificate
+      of the remote peer is not accepted, the connection is closed again. In
+      this case `error()` will return WebSocketError::ACCESS_ERROR.
+     */
+    virtual bool isPeerAccepted(const QSslCertificate &certificate);
+
+    /*!
+      Returns true, iff the errors given by `errors` shall be ignored.
+      Returning false causes the default behavior the underlying
+      `onSslErrors`-method: A single error during a SSL-Connection
+      closes the connection.
+
+      A little hook, because `onSslErrors` is private.
+     */
+    virtual bool shouldIgnoreErrors(const QList<QSslError> &errors);
 
 private slots:
     void onSocketError(QAbstractSocket::SocketError error);

@@ -14,6 +14,24 @@
 
     You should have received a copy of the GNU Lesser General Public
     License along with this library.  If not, see <http://www.gnu.org/licenses/>.
+
+   Changes:
+   - Add hook for ignoring some peers and ssl-errors (2020-07-23 14:19)
+
+     Introduce method `isPeerAccepted` to let subclasses of Tufao::WebSocket
+     allow/disallow peers with specific certificates. This change enables
+     example client software to implement certificate pinning. Per default
+     `isPeerAccepted` returns true, not rejecting any peers / certificates.
+     For the implementation, see changes of slot `onConnected`.
+
+     Furthermore, introducing method `shouldIgnoreErrors` allows subclasses
+     of Tufao::WebSocket to change the semantics of the underyling private
+     `onSslErrors` method: It can ignore SSL errors, which would not be
+     ignored by `onSslErrors`, causing a connection to be closed and a
+     peer to be rejected. Per default `shouldIgnoreErrors` returns false,
+     resulting in the default behavior of the underlying `onSslErrors`-method:
+     A single error during a SSL-Connection closes the connection.
+     For the implementation, see changes of slot `onSslErrors`.
 */
 
 #include "priv/websocket.h"
@@ -451,8 +469,15 @@ void WebSocket::onSocketError(QAbstractSocket::SocketError error)
     emit disconnected();
 }
 
-void WebSocket::onSslErrors(const QList<QSslError> &)
+void WebSocket::onSslErrors(const QList<QSslError> &errors)
 {
+    if (auto socket = dynamic_cast<QSslSocket *>(priv->socket)) {
+        if (shouldIgnoreErrors(errors)) {
+            socket->ignoreSslErrors();
+            return;
+        }
+    }
+
     priv->socket->deleteLater();
     priv->socket = NULL;
     delete priv->clientNode;
@@ -521,6 +546,13 @@ void WebSocket::onConnected()
 
     priv->clientNode->headers.clear();
     priv->clientNode->resource.clear();
+
+    if (auto socket = dynamic_cast<QSslSocket *>(priv->socket)) {
+        if (not isPeerAccepted(socket->peerCertificate())) {
+            priv->lastError = WebSocketError::ACCESS_ERROR;
+            emit disconnected();
+        }
+    }
 }
 
 void WebSocket::onReadyRead()
@@ -981,6 +1013,18 @@ inline bool WebSocketHttpClient::error()
 inline int WebSocketHttpClient::statusCode()
 {
     return status_code;
+}
+
+bool WebSocket::isPeerAccepted(const QSslCertificate &certificate)
+{
+    (void) certificate;
+    return true;
+}
+
+bool WebSocket::shouldIgnoreErrors(const QList<QSslError> &errors)
+{
+    (void) errors;
+    return false;
 }
 
 } // namespace Tufao
